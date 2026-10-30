@@ -1,7 +1,7 @@
 import express from "express";
 import http from "http";
 import {Server} from "socket.io";
-import {createClient} from "redis";
+import { redisClient,connectRedis } from "./src/config/redis.js";
 
 const app = express();
 
@@ -22,12 +22,6 @@ app.get('/' , (req,res)=>{
 
 
 const userSocketMap = new Map();
-
-//Initialize the redis client , By default this connects to localhost:6379
-const redisClient = createClient();
-
-redisClient.on('error' , (err)=> console.log("Redis Client Error",err));
-
 
 //Listen for web socket connection
 io.on('connection',(socket)=>{ //here we create the connection and store the returning socket connection to socket variable 
@@ -55,7 +49,7 @@ const PORT = process.env.PORT || 4000;
 //Blocking Initialization such that the server only start once the redisClient is initialized
 async function startServer(){
     try {
-        await redisClient.connect();
+        await connectRedis();  //Boot up redis first
         console.log("Connected to redis client successfully");
 
         //after the redis is connected we can start the server
