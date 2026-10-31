@@ -2,7 +2,10 @@ import express from "express";
 import http from "http";
 import {Server} from "socket.io";
 import { redisClient,connectRedis } from "./src/config/redis.js";
+import { socketAuthMiddleware } from "./src/middleware/auth.js";
+import dotenv from 'dotenv';
 
+dotenv.config();
 const app = express();
 
 //Wrap express with the raw HTTP server
@@ -11,7 +14,7 @@ const server = http.createServer(app);
 //Initialise Socket.io with cors , here the Server is the whole WebSocketManager which looks for incoming and outgoing and other socket connection req
 const io = new Server(server , {
     cors : {
-        origin: "https://localhost:3000",  //frontend port
+        origin: "http://localhost:3000",  //frontend port
         methods: ['GET' , 'POST']
     }
 })
@@ -23,14 +26,12 @@ app.get('/' , (req,res)=>{
 
 const userSocketMap = new Map();
 
+//Applying the middleware 
+io.use(socketAuthMiddleware);
+
 //Listen for web socket connection
 io.on('connection',(socket)=>{ //here we create the connection and store the returning socket connection to socket variable 
-    const userId = socket.handshake.auth.userId;   //Grab the userId sent by the frontend
-
-    if(!userId){
-        console.log("Connection rejected , no userID provided");
-        return socket.disconnect();
-    }
+    const userId = socket.userId;   //Grab the verified userId from the supabase
 
     //Add the connection to the map
     userSocketMap.set(userId , socket.id);
