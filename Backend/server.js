@@ -65,11 +65,13 @@ io.on('connection',(socket)=>{ //here we create the connection and store the ret
             })
 
             //3.Storing the user constraints i.e their metadata
-            const userRequestKey = `queue:${userId}`;
+            const userRequestKey = `request:${userId}`;
             await redisClient.hSet(userRequestKey , {
                 party_size : partySize.toString(),
                 preferred_vehicle : preferedVehicle,
                 baseline_fare : baselineFare.toString(),
+                pickup_lng : pickupLng.toString(),
+                pickup_lat : pickupLat,
                 dest_lng : destLng.toString(),
                 dest_lat : destLat.toString()
             })
