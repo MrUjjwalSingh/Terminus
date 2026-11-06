@@ -1,4 +1,4 @@
-import {redisClient} from 'redis';
+import { redisClient } from '../config/redis';
 import { calculateEstimatedFare, getRouteMetrics } from '../services/olaMaps';
 
 //We keep running this loop continuously in the background
