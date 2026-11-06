@@ -110,6 +110,9 @@ async function startServer(){
         //after the redis is connected we can start the server
         server.listen(PORT , ()=>{
             console.log(`Server connected on port: ${PORT}`);
+            //simultaneously start the matchmaker worker to start finding other users for pool
+            //Passing the io instance and userSocketMap to the worker
+            startMatchmaker(io , userSocketMap);
         })
     } catch (error) {
         console.error("Failed to start the server because Redis failed to connect:",error);

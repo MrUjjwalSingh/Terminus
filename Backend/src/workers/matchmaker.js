@@ -2,7 +2,7 @@ import {redisClient} from 'redis';
 import { calculateEstimatedFare, getRouteMetrics } from '../services/olaMaps';
 
 //We keep running this loop continuously in the background
-export const startMatchmaker = () =>{
+export const startMatchmaker = (io , userSocketMap) =>{
     console.log("Matchmaker worker started. Scanning for pools ...");
 
     setInterval(async()=>{
@@ -25,7 +25,7 @@ export const startMatchmaker = () =>{
                         queueKey , {member:anchorUser} , {radius:1 , unit:'km'}
                     );
 
-                    if(nearbyUsers.length >=0){
+                    if(nearbyUsers.length >=2){
                         userA = nearbyUsers[0];
                         userB = nearbyUsers[1];
                     }
@@ -60,15 +60,15 @@ export const startMatchmaker = () =>{
                     //1.Fetch real world distance and time from olaMaps
                     //Then fetch pickup coordinates from the hash
                     const routeMetrics = await getRouteMetrics(
-                        reqA.pickupLng , reqApickupLat , reqA.destLng , reqA.destLat 
+                        reqA.pickup_lng , reqA.pickup_lat , reqA.dest_lng , reqA.dest_lat 
                     );
 
                     //If ola api crashes or returns null
                     if(!routeMetrics){
                         console.log(`Ola api failed , restoring ${userA} and ${userB} to queue`);
                         await redisClient.geoAdd(queueKey , [
-                            {longitude : reqA.pickupLng , latitude:reqA.pickupLat , user:userA},
-                            {longitude : reqB.pickupLng , latitude:reqB.pickupLat , user:userA}
+                            {longitude : reqA.pickupLng , latitude:reqA.pickupLat , member:userA},
+                            {longitude : reqB.pickupLng , latitude:reqB.pickupLat , member:userB}
                         ]);
                         continue;
                     }
@@ -111,6 +111,35 @@ export const startMatchmaker = () =>{
                     console.log(`User A pays: ₹${finalBillA} (Started at ₹${baselineA})`);
                     console.log(`User B pays: ₹${finalBillB} (Started at ₹${baselineB})`);
                     console.log(`Terminus Revenue: ₹${Math.round(feeA + feeB)}`);
+
+                    const socketIdA = userSocketMap.get(userA);
+                    const socketIdB = userSocketMap.get(userB);
+
+                    const matchPayloadA = {
+                        status : 'match_found',
+                        vehicle : 'Mini',
+                        totalFare : sharedFare,
+                        yourSplit : finalBillA ,
+                        platformFee : feeA,
+                        matchedUserId : 'Hidden for privacy until accepted ...',
+                        expiresIn : 90
+                    }
+                    const matchPayloadB = {
+                        status : 'match_found',
+                        vehicle : 'Mini',
+                        totalFare : sharedFare,
+                        yourSplit : finalBillB,
+                        platformFee : feeB,
+                        matchedUserId : 'Hidden for privacy until accepted ...',
+                        expiresIn : 90
+                    }
+
+                    if(socketIdA){
+                        io.to(socketIdA).emit("match found",{...matchPayloadA , saved : baselineA - finalBillA});
+                    }
+                    if(socketIdB){
+                        io.to(socketIdB).emit("match found",{...matchPayloadB , saved : baselineB - finalBillB});
+                    }
                 }
             }
         } 
