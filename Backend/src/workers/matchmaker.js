@@ -67,8 +67,8 @@ export const startMatchmaker = (io , userSocketMap) =>{
                     if(!routeMetrics){
                         console.log(`Ola api failed , restoring ${userA} and ${userB} to queue`);
                         await redisClient.geoAdd(queueKey , [
-                            {longitude : reqA.pickupLng , latitude:reqA.pickupLat , member:userA},
-                            {longitude : reqB.pickupLng , latitude:reqB.pickupLat , member:userB}
+                            {longitude : reqA.pickup_lng , latitude:reqA.pickup_lat , member:userA},
+                            {longitude : reqB.pickup_lng , latitude:reqB.pickup_lat , member:userB}
                         ]);
                         continue;
                     }
@@ -85,8 +85,8 @@ export const startMatchmaker = (io , userSocketMap) =>{
                     if(totalSavings <= 1/10 * totalBaseline){
                         console.log(`Financials failed. No efficient savings generated.`);
                         await redisClient.geoAdd(queueKey , [
-                            {longitude : reqA.pickupLng , latitude : reqA.pickupLat  , user: userA},
-                            {longitude : reqB.pickupLng , latitude : reqB.pickupLat  , user: userB},
+                            {longitude : reqA.pickupLng , latitude : reqA.pickupLat  , member: userA},
+                            {longitude : reqB.pickupLng , latitude : reqB.pickupLat  , member: userB},
                         ])
                         continue;
                     }
@@ -135,10 +135,10 @@ export const startMatchmaker = (io , userSocketMap) =>{
                     }
 
                     if(socketIdA){
-                        io.to(socketIdA).emit("match found",{...matchPayloadA , saved : baselineA - finalBillA});
+                        io.to(socketIdA).emit('match_found',{...matchPayloadA , saved : baselineA - finalBillA});
                     }
                     if(socketIdB){
-                        io.to(socketIdB).emit("match found",{...matchPayloadB , saved : baselineB - finalBillB});
+                        io.to(socketIdB).emit('match_found',{...matchPayloadB , saved : baselineB - finalBillB});
                     }
                 }
             }
