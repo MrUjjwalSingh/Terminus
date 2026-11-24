@@ -1,5 +1,5 @@
-import { redisClient } from '../config/redis';
-import { calculateEstimatedFare, getRouteMetrics } from '../services/olaMaps';
+import { redisClient } from '../config/redis.js';
+import { calculateEstimatedFare, getRouteMetrics } from '../services/olaMaps.js';
 
 //We keep running this loop continuously in the background
 export const startMatchmaker = (io , userSocketMap) =>{
@@ -25,10 +25,12 @@ export const startMatchmaker = (io , userSocketMap) =>{
                         queueKey , {member:anchorUser} , {radius:1 , unit:'km'}
                     );
 
-                    if(nearbyUsers.length >=2){
-                        userA = nearbyUsers[0];
-                        userB = nearbyUsers[1];
+                    if(nearbyUsers.length < 2){
+                        continue;
                     }
+
+                    userA = nearbyUsers[0];
+                    userB = nearbyUsers[1];
 
                     //Getting all the details of the user from redis
                     reqA = await redisClient.hGetAll(`request:${userA}`);
@@ -60,7 +62,7 @@ export const startMatchmaker = (io , userSocketMap) =>{
                     //1.Fetch real world distance and time from olaMaps
                     //Then fetch pickup coordinates from the hash
                     const routeMetrics = await getRouteMetrics(
-                        reqA.pickup_lng , reqA.pickup_lat , reqA.dest_lng , reqA.dest_lat 
+                        reqA.pickup_lat , reqA.pickup_lng , reqA.dest_lat , reqA.dest_lng
                     );
 
                     //If ola api crashes or returns null
@@ -85,8 +87,8 @@ export const startMatchmaker = (io , userSocketMap) =>{
                     if(totalSavings <= 1/10 * totalBaseline){
                         console.log(`Financials failed. No efficient savings generated.`);
                         await redisClient.geoAdd(queueKey , [
-                            {longitude : reqA.pickupLng , latitude : reqA.pickupLat  , member: userA},
-                            {longitude : reqB.pickupLng , latitude : reqB.pickupLat  , member: userB},
+                            {longitude : reqA.pickup_lng , latitude : reqA.pickup_lat  , member: userA},
+                            {longitude : reqB.pickup_lng , latitude : reqB.pickup_lat  , member: userB},
                         ])
                         continue;
                     }
