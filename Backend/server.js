@@ -64,6 +64,9 @@ io.on('connection',(socket)=>{ //here we create the connection and store the ret
                 member : userId
             })
 
+            //adding the hotspot to active hotspot's set 
+            await redisClient.sAdd('active_queues' , queueKey);
+
             //3.Storing the user constraints i.e their metadata
             const userRequestKey = `request:${userId}`;
             await redisClient.hSet(userRequestKey , {

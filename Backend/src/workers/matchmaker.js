@@ -7,10 +7,17 @@ export const startMatchmaker = (io , userSocketMap) =>{
 
     setInterval(async()=>{
         try {
-            const queues = await redisClient.keys('queue:*');
+            const queues = await redisClient.sMembers('active_queues');
 
             for(const queueKey of queues){
                 const waitingUsers = await redisClient.zRange(queueKey , 0 ,-1); //zRange returns a sorted set and we get all its elements from first to last
+
+                //deleting the queue with the queueKey which does not have any member
+                if(waitingUsers === 0){
+                    await redisClient.sRem('active_queues',queueKey);
+                    continue;
+                }
+
                 if(waitingUsers.length < 2){
                     continue;
                 }
