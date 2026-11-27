@@ -13,7 +13,7 @@ export const startMatchmaker = (io , userSocketMap) =>{
                 const waitingUsers = await redisClient.zRange(queueKey , 0 ,-1); //zRange returns a sorted set and we get all its elements from first to last
 
                 //deleting the queue with the queueKey which does not have any member
-                if(waitingUsers === 0){
+                if(waitingUsers.length === 0){
                     await redisClient.sRem('active_queues',queueKey);
                     continue;
                 }
@@ -22,49 +22,98 @@ export const startMatchmaker = (io , userSocketMap) =>{
                     continue;
                 }
 
-                let matchFound = false;
-                let userA , userB;
-                let reqA , reqB;
-
-                for(const anchorUser of waitingUsers){
-                    //Searching for users who are in the 1 km radius of the current user
-                    const nearbyUsers = await redisClient.geoSearch(
-                        queueKey , {member:anchorUser} , {radius:1 , unit:'km'}
-                    );
-
-                    if(nearbyUsers.length < 2){
-                        continue;
+                //1.Prefetch every waiting user's hash into the ram which are currently in the queue for a destination
+                const userRequests = new Map();
+                for(const userId of waitingUsers){
+                    const req = await redisClient.hGetAll(`request:${userId}`);
+                    if(req && req.party_size){
+                        userRequests.set(userId , req);
                     }
-
-                    userA = nearbyUsers[0];
-                    userB = nearbyUsers[1];
-
-                    //Getting all the details of the user from redis
-                    reqA = await redisClient.hGetAll(`request:${userA}`);
-                    reqB = await redisClient.hGetAll(`request:${userB}`);
-
-                    //checking if the number of passengers can be accomodated
-                    const totalPax = parseInt(reqA.party_size) + parseInt(reqB.party_size);
-
-                    if(totalPax > 4){
-                        console.log(`Capacity failed for ${userA} & ${userB}. (${totalPax} > 4). Trying next...`);
-                        continue;
-                    }
-
-                    matchFound = true;
-
-                    //Removing as soon as the parties are matched 
-                    await redisClient.zRem(queueKey , [userA , userB]);
-
-                    console.log("Perfect match in");
-                    console.log(`User A: ${userA} | User B: ${userB} | Total Pax: ${totalPax}`);
-
-                    break;
                 }
 
-                //Now we have a match and now we apply the ola maps api math for rest part
-                //The Financial Math
-                if(matchFound){
+                //2.Building a global list of all valid candidate pairs in this bin/queue
+                const candidatePairs = [];
+                const seenPairs = new Set();
+
+                for(const anchorUser of waitingUsers){
+                    const reqA = userRequests.get(anchorUser);
+                    if(!reqA) continue;
+
+                    //Fetching the neighbours within 1 km from this user
+                    const nearby = await redisClient.geoSearchWith(
+                        queueKey , 
+                        {member : anchorUser},
+                        {radius : 1 , unit : 'km'},
+                        ['WITHDIST'],
+                        {SORT : 'ASC'}
+                    )
+
+                    for(const neighbour of nearby){
+                        const otherUser = neighbour.member;
+                        if(otherUser === anchorUser) continue;
+
+                        const pairKey = [anchorUser , otherUser].sort().join(':');
+                        if(seenPairs.has(pairKey)) continue;
+
+                        seenPairs.add(pairKey);
+
+                        const reqB = userRequests.get(otherUser);
+                        if(!reqB) continue;
+
+                        //Capacity check
+                        const totalPax = parseInt(reqA.party_size) + parseInt(reqB.party_size);
+                        if(totalPax > 4) continue;
+
+                        candidatePairs.push({
+                            userA : anchorUser,
+                            userB : otherUser,
+                            reqA,
+                            reqB,
+                            distanceKm : parseFloat(neighbour.distance)
+                        })
+                    }
+                }
+
+                candidatePairs.sort((a,b)=> a.distanceKm - b.distanceKm);
+
+                //4.Walk sorted pairs : lock non overlapping winners and verify fares
+                const alreadyMatched = new Set();
+
+                for(const pair of candidatePairs){
+                    const {userA , userB , reqA , reqB} = pair;
+
+                    //Guard 1:skip the pair if either of the user has already been matched 
+                    if(alreadyMatched.has(userA) || alreadyMatched.has(userB)){
+                        continue;
+                    }
+
+                    //Guard 2:Lock both of the users out of the queue individually
+                    const remA = await redisClient.zRem(queueKey , userA);
+                    const remB = await redisClient.zRem(queueKey , userB);
+
+                    if(remA === 0 || remB === 0){
+                        //One of the rider cancelled the match or vanished midway
+                        if(remA === 1){
+                            await redisClient.geoAdd(queueKey , {
+                                longitude : parseFloat(reqA.pickup_lng),
+                                latitude : parseFloat(reqA.pickup_lat),
+                                member : userA
+                            })
+                        }
+                        if(remB === 1){
+                            await redisClient.geoAdd(queueKey , {
+                                longitude : parseFloat(reqB.pickup_lng),
+                                latitude : parseFloat(reqB.pickup_lat),
+                                member:userB
+                            })
+                        }
+                        continue;
+                    }
+                
+
+                    //Now we have a match and now we apply the ola maps api math for rest part
+                    //The Financial Math
+                
                     console.log(`Checking financials for ${userA} and ${userB}...`);
                     //1.Fetch real world distance and time from olaMaps
                     //Then fetch pickup coordinates from the hash
@@ -143,12 +192,18 @@ export const startMatchmaker = (io , userSocketMap) =>{
                         expiresIn : 90
                     }
 
+                    //Guard 3. Fare passed ,mark both as claimed and emit match_found
+                    alreadyMatched.add(userA);
+                    alreadyMatched.add(userB);
+
                     if(socketIdA){
                         io.to(socketIdA).emit('match_found',{...matchPayloadA , saved : baselineA - finalBillA});
                     }
                     if(socketIdB){
                         io.to(socketIdB).emit('match_found',{...matchPayloadB , saved : baselineB - finalBillB});
                     }
+                
+
                 }
             }
         } 
